@@ -2,6 +2,9 @@
 
 Generate prinable SVG calendars showing moon phases for any year.
 
+
+![moon phase 2026 calendar](images/moon_calendar_2026_2.png)
+
 ## Installation
 
 ```bash
