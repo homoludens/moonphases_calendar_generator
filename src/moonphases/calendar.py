@@ -143,19 +143,18 @@ def build_svg(
         link_base = str(Path(link_base) / f"theme_{theme_obj.name}")
 
     # Verify images exist
-    max_index = theme_obj.max_index
     missing = []
-    for i in range(0, max_index + 1):
+    for i in range(0, theme_obj.max_index + 1):
         if not theme_obj.image_path(image_dir, i, waning=False).exists():
             missing.append(theme_obj.image_filename(i, waning=False))
     if missing:
         raise FileNotFoundError(
-            f"Missing waxing images in {image_dir}: {missing[:5]}{'...' if len(missing) > 5 else ''}"
+            f"Missing images in {image_dir}: {missing[:5]}{'...' if len(missing) > 5 else ''}"
         )
 
     if theme_obj.has_waning_images:
         missing = []
-        for i in range(0, max_index + 1):
+        for i in range(0, theme_obj.max_index + 1):
             if not theme_obj.image_path(image_dir, i, waning=True).exists():
                 missing.append(theme_obj.image_filename(i, waning=True))
         if missing:
@@ -225,38 +224,22 @@ def build_svg(
             d = dt.datetime(year, month, day, 12, 0, tzinfo=dt.timezone.utc)
             frac = moon_phase_fraction(d)
 
-            # Determine if waxing (0-0.5) or waning (0.5-1.0)
+            # Get image index and flip flag from theme
+            use_idx, flip = theme_obj.get_image_index(frac)
+
+            # Determine if waning for themes with separate waning images
             is_waning = frac > 0.5
-
-            # Map phase to image index
-            # Phase 0 = new moon (index 0)
-            # Phase 0.5 = full moon (index max_index)
-            # Phase 1 = new moon again (index 0)
-            if is_waning:
-                # Waning: 0.5->1.0 maps to max_index->0
-                phase_in_half = (frac - 0.5) * 2  # 0 to 1
-                use_idx = int(round((1 - phase_in_half) * max_index))
-            else:
-                # Waxing: 0->0.5 maps to 0->max_index
-                phase_in_half = frac * 2  # 0 to 1
-                use_idx = int(round(phase_in_half * max_index))
-
-            use_idx = max(0, min(max_index, use_idx))  # Clamp
 
             x = margin_left + (month - 1) * col_w
             y = margin_top + (day - 1) * row_h
             cx = x + img_size / 2
             cy = y + img_size / 2
 
-            # Determine flip and href
+            # Get href based on theme type
             if theme_obj.has_waning_images:
-                # Theme has dedicated waning images
                 href = href_for(use_idx, waning=is_waning)
-                flip = False
             else:
-                # Mirror waxing images for waning phase
                 href = href_for(use_idx, waning=False)
-                flip = is_waning
 
             # Calculate rotation if latitude provided
             tilt = 0.0
