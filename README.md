@@ -1,7 +1,9 @@
 # Moon Phases Calendar
 
-Generate prinable SVG calendars showing moon phases for any year.
+Generate prinable SVG calendars showing moon phases for any year using only python standard library.
 
+
+Example
 
 ![moon phase 2026 calendar](images/moon_calendar_2026_2.png)
 
