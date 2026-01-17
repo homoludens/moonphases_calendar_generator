@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import calendar
 import datetime as dt
+import math
 import os
 from pathlib import Path
 from urllib.parse import quote
@@ -24,6 +25,54 @@ def moon_phase_fraction(date_utc: dt.datetime) -> float:
     """
     delta_days = (date_utc - REF_NEW_MOON_UTC).total_seconds() / 86400.0
     return (delta_days % SYNODIC_MONTH) / SYNODIC_MONTH
+
+
+def moon_tilt_angle(date_utc: dt.datetime, latitude: float) -> float:
+    """
+    Calculate the approximate moon tilt angle (parallactic angle) for display.
+
+    The moon's apparent tilt depends on the observer's latitude and the moon's
+    position in the sky. This is a simplified calculation that gives a visually
+    reasonable approximation.
+
+    Args:
+        date_utc: Date/time in UTC
+        latitude: Observer's latitude in degrees (positive = North)
+
+    Returns:
+        Tilt angle in degrees. Positive = clockwise rotation.
+    """
+    # Get day of year for seasonal variation
+    day_of_year = date_utc.timetuple().tm_yday
+
+    # Moon's declination varies roughly between -28.5 and +28.5 degrees
+    # over an 18.6-year cycle, simplified here to annual variation
+    # Plus monthly variation due to moon's orbit
+    days_since_ref = (date_utc - REF_NEW_MOON_UTC).total_seconds() / 86400.0
+
+    # Approximate moon declination (simplified)
+    # Annual component (sun's position affects moon's path)
+    annual_angle = 2 * math.pi * day_of_year / 365.25
+    # Monthly component (moon's orbital inclination ~5 degrees)
+    monthly_angle = 2 * math.pi * (days_since_ref % 27.32) / 27.32
+
+    moon_dec = 23.4 * math.sin(annual_angle) + 5.1 * math.sin(monthly_angle)
+    moon_dec_rad = math.radians(moon_dec)
+
+    # Observer latitude
+    lat_rad = math.radians(latitude)
+
+    # Simplified parallactic angle calculation
+    # When moon is on meridian (hour angle = 0), parallactic angle depends on
+    # the difference between observer latitude and moon declination
+    # This gives the "tilt" of the terminator line
+
+    # The tilt angle is approximately:
+    # tilt = latitude - moon_declination (when moon is on meridian)
+    # This is simplified but gives visually correct results for most purposes
+    tilt = latitude - moon_dec
+
+    return tilt
 
 
 def choose_icon_index(phase_frac: float, max_index: int) -> int:
@@ -51,10 +100,9 @@ def build_svg(
     margin_top: int = 70,
     bg_color: str | None = None,
     fg_color: str | None = None,
-    prefix: str | None = None,
-    ext: str | None = None,
     link_base: str | None = None,
     theme: str | Theme = DEFAULT_THEME,
+    latitude: float | None = None,
 ) -> None:
     """
     Create an SVG calendar:
@@ -72,10 +120,9 @@ def build_svg(
         margin_top: Top margin
         bg_color: Background color (overrides theme)
         fg_color: Foreground/text color (overrides theme)
-        prefix: Image filename prefix (overrides theme)
-        ext: Image file extension (overrides theme)
         link_base: Base path for SVG hrefs (None = filenames only)
         theme: Theme name or Theme object
+        latitude: Observer latitude in degrees for moon tilt (None = no rotation)
     """
     # Resolve theme
     if isinstance(theme, str):
@@ -84,8 +131,6 @@ def build_svg(
         theme_obj = theme
 
     # Use theme defaults, allow overrides
-    prefix = prefix if prefix is not None else theme_obj.prefix
-    ext = ext if ext is not None else theme_obj.ext
     bg_color = bg_color if bg_color is not None else theme_obj.bg_color
     fg_color = fg_color if fg_color is not None else theme_obj.fg_color
 
@@ -97,17 +142,26 @@ def build_svg(
     if link_base and image_dir != original_image_dir:
         link_base = str(Path(link_base) / f"theme_{theme_obj.name}")
 
-    # Decide if you have a full lunation set (0..28) or only 0..14
-    has_28 = all(file_exists(image_dir, i, prefix, ext) for i in range(0, 29))
-    has_14 = all(file_exists(image_dir, i, prefix, ext) for i in range(0, 15))
-
-    if not (has_28 or has_14):
+    # Verify images exist
+    max_index = theme_obj.max_index
+    missing = []
+    for i in range(0, max_index + 1):
+        if not theme_obj.image_path(image_dir, i, waning=False).exists():
+            missing.append(theme_obj.image_filename(i, waning=False))
+    if missing:
         raise FileNotFoundError(
-            f"Could not find a complete icon set in {image_dir}.\n"
-            f"Expected either {prefix}0..{prefix}28{ext} OR {prefix}0..{prefix}14{ext}."
+            f"Missing waxing images in {image_dir}: {missing[:5]}{'...' if len(missing) > 5 else ''}"
         )
 
-    max_index = 28 if has_28 else 14
+    if theme_obj.has_waning_images:
+        missing = []
+        for i in range(0, max_index + 1):
+            if not theme_obj.image_path(image_dir, i, waning=True).exists():
+                missing.append(theme_obj.image_filename(i, waning=True))
+        if missing:
+            raise FileNotFoundError(
+                f"Missing waning images in {image_dir}: {missing[:5]}{'...' if len(missing) > 5 else ''}"
+            )
 
     months = list("JFMAMJJASOND")
 
@@ -119,8 +173,8 @@ def build_svg(
     width = margin_left + 12 * col_w + margin_left
     height = margin_top + 31 * row_h + 40
 
-    def href_for(idx: int) -> str:
-        fname = f"{prefix}{idx}{ext}"
+    def href_for(idx: int, waning: bool = False) -> str:
+        fname = theme_obj.image_filename(idx, waning)
         if link_base:
             return quote(str(Path(link_base) / fname).replace(os.sep, "/"))
         return quote(fname)
@@ -171,38 +225,63 @@ def build_svg(
             d = dt.datetime(year, month, day, 12, 0, tzinfo=dt.timezone.utc)
             frac = moon_phase_fraction(d)
 
-            if max_index == 28:
-                idx = choose_icon_index(frac, 28)
-                flip = False
-                use_idx = idx
+            # Determine if waxing (0-0.5) or waning (0.5-1.0)
+            is_waning = frac > 0.5
+
+            # Map phase to image index
+            # Phase 0 = new moon (index 0)
+            # Phase 0.5 = full moon (index max_index)
+            # Phase 1 = new moon again (index 0)
+            if is_waning:
+                # Waning: 0.5->1.0 maps to max_index->0
+                phase_in_half = (frac - 0.5) * 2  # 0 to 1
+                use_idx = int(round((1 - phase_in_half) * max_index))
             else:
-                # Only 0..14 available (waxing). Mirror for waning.
-                pos = choose_icon_index(frac, 28)
-                if pos <= 14:
-                    use_idx = pos
-                    flip = False
-                else:
-                    use_idx = 28 - pos
-                    flip = True
+                # Waxing: 0->0.5 maps to 0->max_index
+                phase_in_half = frac * 2  # 0 to 1
+                use_idx = int(round(phase_in_half * max_index))
+
+            use_idx = max(0, min(max_index, use_idx))  # Clamp
 
             x = margin_left + (month - 1) * col_w
             y = margin_top + (day - 1) * row_h
+            cx = x + img_size / 2
+            cy = y + img_size / 2
 
-            href = href_for(use_idx)
-
-            if not flip:
-                parts.append(
-                    f'<image href="{href}" x="{x}" y="{y}" '
-                    f'width="{img_size}" height="{img_size}" />'
-                )
+            # Determine flip and href
+            if theme_obj.has_waning_images:
+                # Theme has dedicated waning images
+                href = href_for(use_idx, waning=is_waning)
+                flip = False
             else:
-                cx = x + img_size / 2
-                cy = y + img_size / 2
+                # Mirror waxing images for waning phase
+                href = href_for(use_idx, waning=False)
+                flip = is_waning
+
+            # Calculate rotation if latitude provided
+            tilt = 0.0
+            if latitude is not None:
+                tilt = moon_tilt_angle(d, latitude)
+
+            # Build transform
+            transforms = []
+            if flip:
+                transforms.append(f"translate({cx},{cy}) scale(-1,1) translate({-cx},{-cy})")
+            if tilt != 0:
+                transforms.append(f"rotate({tilt:.1f},{cx:.1f},{cy:.1f})")
+
+            if transforms:
+                transform_str = " ".join(transforms)
                 parts.append(
-                    f'<g transform="translate({cx},{cy}) scale(-1,1) translate({-cx},{-cy})">'
+                    f'<g transform="{transform_str}">'
                     f'<image href="{href}" x="{x}" y="{y}" '
                     f'width="{img_size}" height="{img_size}" />'
                     f'</g>'
+                )
+            else:
+                parts.append(
+                    f'<image href="{href}" x="{x}" y="{y}" '
+                    f'width="{img_size}" height="{img_size}" />'
                 )
 
     parts.append("</svg>")

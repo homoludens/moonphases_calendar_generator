@@ -42,6 +42,10 @@ def main():
         "-t", "--theme", type=str, default=DEFAULT_THEME,
         help=f"Theme name (available: {', '.join(list_themes())}; default: {DEFAULT_THEME})"
     )
+    gen_parser.add_argument(
+        "--lat", "--latitude", type=float, default=None, dest="latitude",
+        help="Observer latitude in degrees for moon tilt (e.g., 45.0 for 45°N, -33.9 for Sydney)"
+    )
 
     args = parser.parse_args()
 
@@ -58,6 +62,7 @@ def main():
             img_size=args.img_size,
             link_base=str(args.images),
             theme=args.theme,
+            latitude=args.latitude,
         )
         print(f"Generated: {output.resolve()}")
 
