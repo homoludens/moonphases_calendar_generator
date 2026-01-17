@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import calendar
 import datetime as dt
 import math
@@ -10,6 +11,10 @@ from pathlib import Path
 from urllib.parse import quote
 
 from .themes import DEFAULT_THEME, Theme, get_theme, resolve_theme_dir
+
+# Default font path (relative to package)
+DEFAULT_FONT_PATH = Path(__file__).parent.parent.parent / "moonphases" / "fonts" / "URWBookman-Demi.ttf"
+DEFAULT_FONT_FAMILY = "URWBookman-Demi"
 
 SYNODIC_MONTH = 29.53058867  # days
 
@@ -103,6 +108,8 @@ def build_svg(
     link_base: str | None = None,
     theme: str | Theme = DEFAULT_THEME,
     latitude: float | None = None,
+    font_path: Path | None = None,
+    font_family: str | None = None,
 ) -> None:
     """
     Create an SVG calendar:
@@ -123,6 +130,8 @@ def build_svg(
         link_base: Base path for SVG hrefs (None = filenames only)
         theme: Theme name or Theme object
         latitude: Observer latitude in degrees for moon tilt (None = no rotation)
+        font_path: Path to TTF/OTF font file to embed (None = use default)
+        font_family: Font family name for CSS (None = derive from font filename)
     """
     # Resolve theme
     if isinstance(theme, str):
@@ -133,6 +142,26 @@ def build_svg(
     # Use theme defaults, allow overrides
     bg_color = bg_color if bg_color is not None else theme_obj.bg_color
     fg_color = fg_color if fg_color is not None else theme_obj.fg_color
+
+    # Resolve font
+    if font_path is None:
+        font_path = DEFAULT_FONT_PATH
+    if font_family is None:
+        font_family = font_path.stem if font_path.exists() else DEFAULT_FONT_FAMILY
+
+    # Load and encode font if it exists
+    font_style = ""
+    if font_path.exists():
+        font_data = font_path.read_bytes()
+        font_b64 = base64.b64encode(font_data).decode("ascii")
+        font_ext = font_path.suffix.lower()
+        font_format = "truetype" if font_ext == ".ttf" else "opentype"
+        font_style = f"""<style>
+@font-face {{
+  font-family: '{font_family}';
+  src: url('data:font/{font_ext[1:]};base64,{font_b64}') format('{font_format}');
+}}
+</style>"""
 
     # Resolve image directory (check for theme subdirectory)
     original_image_dir = image_dir
@@ -185,12 +214,14 @@ def build_svg(
         f'xmlns:xlink="http://www.w3.org/1999/xlink" '
         f'width="{width}" height="{height}" viewBox="0 0 {width} {height}">'
     )
+    if font_style:
+        parts.append(font_style)
     parts.append(f'<rect width="100%" height="100%" fill="{bg_color}"/>')
 
     # Title
     parts.append(
-        f'<text x="{width/2:.1f}" y="42" text-anchor="middle" '
-        f'font-family="serif" font-size="32" fill="{fg_color}">{year}</text>'
+        f'<text x="{width/2:.1f}" y="32" text-anchor="middle" '
+        f'font-family="\'{font_family}\', serif" font-size="32" fill="{fg_color}">{year}</text>'
     )
 
     # Month letters
@@ -198,7 +229,7 @@ def build_svg(
         x = margin_left + (m - 1) * col_w + img_size / 2
         parts.append(
             f'<text x="{x:.1f}" y="{margin_top-18}" text-anchor="middle" '
-            f'font-family="sans-serif" font-size="16" fill="{fg_color}">{letter}</text>'
+            f'font-family="\'{font_family}\', sans-serif" font-size="16" fill="{fg_color}">{letter}</text>'
         )
 
     # Day numbers left & right
@@ -206,11 +237,11 @@ def build_svg(
         y = margin_top + (day - 1) * row_h + img_size * 0.75
         parts.append(
             f'<text x="{margin_left-18}" y="{y:.1f}" text-anchor="end" '
-            f'font-family="sans-serif" font-size="16" fill="{fg_color}">{day}</text>'
+            f'font-family="\'{font_family}\', sans-serif" font-size="16" fill="{fg_color}">{day}</text>'
         )
         parts.append(
             f'<text x="{width-(margin_left-18)}" y="{y:.1f}" text-anchor="start" '
-            f'font-family="sans-serif" font-size="16" fill="{fg_color}">{day}</text>'
+            f'font-family="\'{font_family}\', sans-serif" font-size="16" fill="{fg_color}">{day}</text>'
         )
 
     # Images grid

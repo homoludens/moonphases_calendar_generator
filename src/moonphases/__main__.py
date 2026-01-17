@@ -3,7 +3,7 @@
 import argparse
 from pathlib import Path
 
-from .calendar import build_svg
+from .calendar import build_svg, DEFAULT_FONT_PATH
 from .downloader import download_moon_images
 from .themes import DEFAULT_THEME, list_themes
 
@@ -46,6 +46,14 @@ def main():
         "--lat", "--latitude", type=float, default=None, dest="latitude",
         help="Observer latitude in degrees for moon tilt (e.g., 45.0 for 45°N, -33.9 for Sydney)"
     )
+    gen_parser.add_argument(
+        "--font", type=Path, default=None,
+        help=f"Path to TTF/OTF font file to embed (default: {DEFAULT_FONT_PATH.name})"
+    )
+    gen_parser.add_argument(
+        "--font-family", type=str, default=None,
+        help="Font family name for CSS (default: derived from font filename)"
+    )
 
     args = parser.parse_args()
 
@@ -63,6 +71,8 @@ def main():
             link_base=str(args.images),
             theme=args.theme,
             latitude=args.latitude,
+            font_path=args.font,
+            font_family=args.font_family,
         )
         print(f"Generated: {output.resolve()}")
 
