@@ -2,8 +2,7 @@
 
 from pathlib import Path
 from urllib.parse import urlparse
-
-import requests
+from urllib.request import Request, urlopen
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
@@ -12,14 +11,15 @@ HEADERS = {
 
 def download_image(url: str, output_dir: Path) -> Path:
     """Download an image from URL to output directory."""
-    r = requests.get(url, headers=HEADERS, timeout=10)
-    r.raise_for_status()
+    req = Request(url, headers=HEADERS)
+    with urlopen(req, timeout=10) as response:
+        data = response.read()
 
     filename = Path(urlparse(url).path).name
     output_path = output_dir / filename
 
     with open(output_path, "wb") as f:
-        f.write(r.content)
+        f.write(data)
 
     return output_path
 
