@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .calendar import build_svg
 from .downloader import download_moon_images
+from .themes import DEFAULT_THEME, list_themes
 
 
 def main():
@@ -37,6 +38,10 @@ def main():
         "--img-size", type=int, default=30,
         help="Size of moon images in SVG (default: 30)"
     )
+    gen_parser.add_argument(
+        "-t", "--theme", type=str, default=DEFAULT_THEME,
+        help=f"Theme name (available: {', '.join(list_themes())}; default: {DEFAULT_THEME})"
+    )
 
     args = parser.parse_args()
 
@@ -52,6 +57,7 @@ def main():
             out_svg=output,
             img_size=args.img_size,
             link_base=str(args.images),
+            theme=args.theme,
         )
         print(f"Generated: {output.resolve()}")
 

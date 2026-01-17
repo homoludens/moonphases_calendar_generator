@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 from urllib.parse import quote
 
+from .themes import DEFAULT_THEME, Theme, get_theme, resolve_theme_dir
+
 SYNODIC_MONTH = 29.53058867  # days
 
 # Reference new moon (approx): 2000-01-06 18:14 UTC
@@ -47,22 +49,53 @@ def build_svg(
     gap_y: int = 6,
     margin_left: int = 56,
     margin_top: int = 70,
-    bg_color: str = "#000000",
-    fg_color: str = "#ffffff",
-    prefix: str = "d_150_",
-    ext: str = ".jpg",
+    bg_color: str | None = None,
+    fg_color: str | None = None,
+    prefix: str | None = None,
+    ext: str | None = None,
     link_base: str | None = None,
+    theme: str | Theme = DEFAULT_THEME,
 ) -> None:
     """
     Create an SVG calendar:
       columns = months (Jan..Dec)
       rows    = days (1..31)
 
-    `link_base` controls href paths in SVG:
-      - None => use filenames only (e.g. d_150_3.jpg)
-      - "images" => images/d_150_3.jpg
-      - absolute path also possible (not always portable)
+    Args:
+        year: Calendar year
+        image_dir: Base directory containing moon images (or theme subdirectories)
+        out_svg: Output SVG file path
+        img_size: Size of moon images in pixels
+        gap_x: Horizontal gap between images
+        gap_y: Vertical gap between images
+        margin_left: Left margin
+        margin_top: Top margin
+        bg_color: Background color (overrides theme)
+        fg_color: Foreground/text color (overrides theme)
+        prefix: Image filename prefix (overrides theme)
+        ext: Image file extension (overrides theme)
+        link_base: Base path for SVG hrefs (None = filenames only)
+        theme: Theme name or Theme object
     """
+    # Resolve theme
+    if isinstance(theme, str):
+        theme_obj = get_theme(theme)
+    else:
+        theme_obj = theme
+
+    # Use theme defaults, allow overrides
+    prefix = prefix if prefix is not None else theme_obj.prefix
+    ext = ext if ext is not None else theme_obj.ext
+    bg_color = bg_color if bg_color is not None else theme_obj.bg_color
+    fg_color = fg_color if fg_color is not None else theme_obj.fg_color
+
+    # Resolve image directory (check for theme subdirectory)
+    original_image_dir = image_dir
+    image_dir = resolve_theme_dir(image_dir, theme_obj.name)
+
+    # Update link_base if theme subdirectory was used
+    if link_base and image_dir != original_image_dir:
+        link_base = str(Path(link_base) / f"theme_{theme_obj.name}")
 
     # Decide if you have a full lunation set (0..28) or only 0..14
     has_28 = all(file_exists(image_dir, i, prefix, ext) for i in range(0, 29))
