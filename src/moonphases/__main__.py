@@ -51,28 +51,36 @@ def main():
         help="Size of moon images in SVG (default: 30)"
     )
     gen_parser.add_argument(
-        "-t", "--theme", type=str, default=DEFAULT_THEME,
-        help=f"Theme name (available: {', '.join(list_themes())}; default: {DEFAULT_THEME})"
+        "-t", "--theme", type=str, default="yellow",
+        help=f"Theme name (available: {', '.join(list_themes())}; default: yellow)"
     )
     gen_parser.add_argument(
         "--lat", "--latitude", type=float, default=None, dest="latitude",
         help="Observer latitude in degrees for moon tilt (e.g., 45.0 for 45°N, -33.9 for Sydney)"
     )
     gen_parser.add_argument(
-        "--font", type=Path, default=None,
-        help=f"Path to TTF/OTF font file to embed (default: {DEFAULT_FONT_PATH.name})"
+        "--font", type=Path, default=Path("moonphases/fonts/immortal.ttf"),
+        help="Path to TTF/OTF font file to embed (default: moonphases/fonts/immortal.ttf)"
     )
     gen_parser.add_argument(
         "--font-family", type=str, default=None,
         help="Font family name for CSS (default: derived from font filename)"
     )
     gen_parser.add_argument(
-        "--embed-images", action="store_true",
-        help="Embed images as base64 data URIs in the SVG (creates standalone file)"
+        "--embed-images", action="store_true", default=True,
+        help="Embed images as base64 data URIs in the SVG (default: True)"
     )
     gen_parser.add_argument(
-        "--create-pdf", action="store_true",
-        help="Also create a PDF version of the calendar (requires playwright)"
+        "--no-embed-images", action="store_false", dest="embed_images",
+        help="Don't embed images, use file references instead"
+    )
+    gen_parser.add_argument(
+        "--create-pdf", action="store_true", default=True,
+        help="Also create a PDF version of the calendar (default: True, requires playwright)"
+    )
+    gen_parser.add_argument(
+        "--no-pdf", action="store_false", dest="create_pdf",
+        help="Don't create PDF, only generate SVG"
     )
     gen_parser.add_argument(
         "--pdf-format", type=str, default="A3",
@@ -86,9 +94,10 @@ def main():
         print(f"Downloaded {len(paths)} images to {args.output}")
 
     elif args.command == "generate":
-        output = args.output or Path(f"moon_calendar_{args.year}.svg")
+        year = args.year if args.year is not None else get_default_year()
+        output = args.output or Path(f"moon_calendar_{year}.svg")
         build_svg(
-            year=args.year,
+            year=year,
             image_dir=args.images,
             out_svg=output,
             img_size=args.img_size,
