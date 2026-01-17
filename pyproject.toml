@@ -3,7 +3,9 @@ name = "moonphases"
 version = "0.1.0"
 description = "Generate moon phase calendar SVG images"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "playwright>=1.57.0",
+]
 
 [project.scripts]
 moonphases = "moonphases.__main__:main"

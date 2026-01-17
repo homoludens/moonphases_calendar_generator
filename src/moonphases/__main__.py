@@ -1,11 +1,20 @@
 """Command-line interface for moonphases."""
 
 import argparse
+from datetime import datetime
 from pathlib import Path
 
 from .calendar import build_svg, DEFAULT_FONT_PATH
 from .downloader import download_moon_images
 from .themes import DEFAULT_THEME, list_themes
+
+
+def get_default_year() -> int:
+    """Return current year, or next year if we're in December."""
+    now = datetime.now()
+    if now.month == 12:
+        return now.year + 1
+    return now.year
 
 
 def main():
@@ -25,10 +34,13 @@ def main():
 
     # Generate command
     gen_parser = subparsers.add_parser("generate", help="Generate calendar SVG")
-    gen_parser.add_argument("year", type=int, help="Year for the calendar")
     gen_parser.add_argument(
-        "-i", "--images", type=Path, default=Path("images"),
-        help="Directory containing moon phase images (default: images)"
+        "year", type=int, nargs="?", default=None,
+        help="Year for the calendar (default: current year, or next year in December)"
+    )
+    gen_parser.add_argument(
+        "-i", "--images", type=Path, default=Path("moonphases"),
+        help="Directory containing moon phase images (default: moonphases)"
     )
     gen_parser.add_argument(
         "-o", "--output", type=Path, default=None,
@@ -54,6 +66,18 @@ def main():
         "--font-family", type=str, default=None,
         help="Font family name for CSS (default: derived from font filename)"
     )
+    gen_parser.add_argument(
+        "--embed-images", action="store_true",
+        help="Embed images as base64 data URIs in the SVG (creates standalone file)"
+    )
+    gen_parser.add_argument(
+        "--create-pdf", action="store_true",
+        help="Also create a PDF version of the calendar (requires playwright)"
+    )
+    gen_parser.add_argument(
+        "--pdf-format", type=str, default="A3",
+        help="PDF page format (default: A3). Options: A3, A4, Letter, etc."
+    )
 
     args = parser.parse_args()
 
@@ -73,8 +97,24 @@ def main():
             latitude=args.latitude,
             font_path=args.font,
             font_family=args.font_family,
+            embed_images=args.embed_images,
         )
         print(f"Generated: {output.resolve()}")
+
+        if args.create_pdf:
+            try:
+                from .svg_to_pdf import svg_to_pdf
+            except ImportError:
+                print("Error: --create-pdf requires playwright. Install it with: pip install playwright && playwright install chromium")
+                raise SystemExit(1)
+
+            pdf_output = output.with_suffix(".pdf")
+            svg_to_pdf(
+                svg_path=output,
+                pdf_path=pdf_output,
+                page_format=args.pdf_format,
+            )
+            print(f"Generated: {pdf_output.resolve()}")
 
     else:
         parser.print_help()

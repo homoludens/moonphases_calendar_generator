@@ -110,6 +110,7 @@ def build_svg(
     latitude: float | None = None,
     font_path: Path | None = None,
     font_family: str | None = None,
+    embed_images: bool = False,
 ) -> None:
     """
     Create an SVG calendar:
@@ -132,6 +133,7 @@ def build_svg(
         latitude: Observer latitude in degrees for moon tilt (None = no rotation)
         font_path: Path to TTF/OTF font file to embed (None = use default)
         font_family: Font family name for CSS (None = derive from font filename)
+        embed_images: If True, embed images as base64 data URIs instead of file references
     """
     # Resolve theme
     if isinstance(theme, str):
@@ -201,21 +203,101 @@ def build_svg(
     width = margin_left + 12 * col_w + margin_left
     height = margin_top + 31 * row_h + 40
 
-    def href_for(idx: int, waning: bool = False) -> str:
+    # Image embedding cache: maps filename to (data_uri, def_id)
+    image_cache: dict[str, tuple[str, str]] = {}
+    # Track which images are used (for defs section)
+    used_images: set[str] = set()
+
+    def get_image_info(idx: int, waning: bool = False) -> tuple[str, str | None]:
+        """
+        Returns (href, def_id) for an image.
+        If embed_images is True, returns (data_uri, def_id) where def_id can be used with <use>.
+        If embed_images is False, returns (file_href, None).
+        """
         fname = theme_obj.image_filename(idx, waning)
-        if link_base:
-            return quote(str(Path(link_base) / fname).replace(os.sep, "/"))
-        return quote(fname)
+
+        if embed_images:
+            used_images.add(fname)
+            # Check cache first
+            if fname in image_cache:
+                return image_cache[fname]
+
+            # Load and encode image
+            img_path = image_dir / fname
+            if not img_path.exists():
+                raise FileNotFoundError(f"Image not found: {img_path}")
+
+            img_data = img_path.read_bytes()
+            img_b64 = base64.b64encode(img_data).decode("ascii")
+
+            # Determine MIME type from extension
+            ext = img_path.suffix.lower()
+            mime_type = {
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".png": "image/png",
+                ".gif": "image/gif",
+                ".svg": "image/svg+xml",
+            }.get(ext, "image/png")
+
+            data_uri = f"data:{mime_type};base64,{img_b64}"
+            # Create a safe ID from filename
+            def_id = f"img_{fname.replace('.', '_').replace('-', '_')}"
+            image_cache[fname] = (data_uri, def_id)
+            return data_uri, def_id
+        else:
+            # Return file reference
+            if link_base:
+                return quote(str(Path(link_base) / fname).replace(os.sep, "/"), None)
+            return quote(fname), None
+
+    # First pass: collect all image data needed for the calendar
+    # This populates image_cache with all images we'll need
+    grid_data: list[tuple[int, int, int, bool, bool, float]] = []  # (month, day, idx, waning, flip, tilt)
+    for month in range(1, 13):
+        _, days_in_month = calendar.monthrange(year, month)
+        for day in range(1, 32):
+            if day > days_in_month:
+                continue
+
+            d = dt.datetime(year, month, day, 12, 0, tzinfo=dt.timezone.utc)
+            frac = moon_phase_fraction(d)
+            use_idx, flip = theme_obj.get_image_index(frac)
+            is_waning = frac > 0.5
+
+            tilt = 0.0
+            if latitude is not None:
+                tilt = moon_tilt_angle(d, latitude)
+
+            # Populate the cache by calling get_image_info
+            if theme_obj.has_waning_images:
+                get_image_info(use_idx, waning=is_waning)
+            else:
+                get_image_info(use_idx, waning=False)
+
+            grid_data.append((month, day, use_idx, is_waning, flip, tilt))
 
     # Start SVG
     parts: list[str] = []
     parts.append(
         f'<svg xmlns="http://www.w3.org/2000/svg" '
         f'xmlns:xlink="http://www.w3.org/1999/xlink" '
+        # f'width="100%" height="100%" preserveAspectRatio="xMidYMid meet">'
         f'width="{width}" height="{height}" viewBox="0 0 {width} {height}">'
     )
     if font_style:
         parts.append(font_style)
+
+    # Add defs section with all unique images (only when embedding)
+    if embed_images and image_cache:
+        parts.append("<defs>")
+        for fname, (data_uri, def_id) in image_cache.items():
+            parts.append(
+                f'<image id="{def_id}" href="{data_uri}" '
+                f'width="{img_size}" height="{img_size}" />'
+            )
+        parts.append("</defs>")
+
     parts.append(f'<rect width="100%" height="100%" fill="{bg_color}"/>')
 
     # Title
@@ -245,45 +327,36 @@ def build_svg(
         )
 
     # Images grid
-    for month in range(1, 13):
-        _, days_in_month = calendar.monthrange(year, month)
-        for day in range(1, 32):
-            if day > days_in_month:
-                continue
+    for month, day, use_idx, is_waning, flip, tilt in grid_data:
+        x = margin_left + (month - 1) * col_w
+        y = margin_top + (day - 1) * row_h
+        cx = x + img_size / 2
+        cy = y + img_size / 2
 
-            # Use noon UTC to reduce timezone edge effects
-            d = dt.datetime(year, month, day, 12, 0, tzinfo=dt.timezone.utc)
-            frac = moon_phase_fraction(d)
+        # Get image info
+        if theme_obj.has_waning_images:
+            href, def_id = get_image_info(use_idx, waning=is_waning)
+        else:
+            href, def_id = get_image_info(use_idx, waning=False)
 
-            # Get image index and flip flag from theme
-            use_idx, flip = theme_obj.get_image_index(frac)
+        # Build transform
+        transforms = []
+        if flip:
+            transforms.append(f"translate({cx},{cy}) scale(-1,1) translate({-cx},{-cy})")
+        if tilt != 0:
+            transforms.append(f"rotate({tilt:.1f},{cx:.1f},{cy:.1f})")
 
-            # Determine if waning for themes with separate waning images
-            is_waning = frac > 0.5
-
-            x = margin_left + (month - 1) * col_w
-            y = margin_top + (day - 1) * row_h
-            cx = x + img_size / 2
-            cy = y + img_size / 2
-
-            # Get href based on theme type
-            if theme_obj.has_waning_images:
-                href = href_for(use_idx, waning=is_waning)
+        if embed_images and def_id:
+            # Use <use> element to reference the defined image
+            if transforms:
+                transform_str = " ".join(transforms)
+                parts.append(
+                    f'<use href="#{def_id}" x="{x}" y="{y}" transform="{transform_str}" />'
+                )
             else:
-                href = href_for(use_idx, waning=False)
-
-            # Calculate rotation if latitude provided
-            tilt = 0.0
-            if latitude is not None:
-                tilt = moon_tilt_angle(d, latitude)
-
-            # Build transform
-            transforms = []
-            if flip:
-                transforms.append(f"translate({cx},{cy}) scale(-1,1) translate({-cx},{-cy})")
-            if tilt != 0:
-                transforms.append(f"rotate({tilt:.1f},{cx:.1f},{cy:.1f})")
-
+                parts.append(f'<use href="#{def_id}" x="{x}" y="{y}" />')
+        else:
+            # Use direct <image> element with file reference
             if transforms:
                 transform_str = " ".join(transforms)
                 parts.append(
