@@ -6,11 +6,19 @@ Example
 
 ![moon phase 2026 calendar](images/moon_calendar_2026_2.png)
 
-## Installation
+## Quick Start (no installation)
+
+```bash
+./generate_calendar.py generate 2027 -i moonphases -t white --lat 45
+```
+
+## Installation (optional)
 
 ```bash
 pip install -e .
 ```
+
+After installation, use `moonphases` instead of `./generate_calendar.py`.
 
 ## Usage
 
@@ -77,6 +85,7 @@ moonphases/
 │   ├── theme_white/   # White moon theme (jpg)
 │   └── theme_yellow/  # Yellow moon theme (png)
 ├── images/            # Generated outputs
+├── generate_calendar.py  # Run without installing
 ├── pyproject.toml
 └── README.md
 ```
